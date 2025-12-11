@@ -1,0 +1,32 @@
+name: rent_calc
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.3
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Utilities
+  nepali_utils: ^3.0.8        # Has NepaliDateTime, NepaliDateFormat, etc.
+  nepali_date_picker: ^7.0.0  # Bikram Sambat date picker; uses nepali_utils types.
+  shared_preferences: ^2.5.3  # Local key-value storage for history.
+
+  # Sharing & Screenshots (New)
+  screenshot: ^3.0.0          # To capture the receipt widget as an image
+  share_plus: ^10.0.0         # To share the image to WhatsApp/Messenger
+  path_provider: ^2.1.2       # To get temporary storage path
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
