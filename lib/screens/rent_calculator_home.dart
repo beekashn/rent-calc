@@ -15,6 +15,8 @@ import '../widgets/section_card.dart';
 import '../widgets/pro_input.dart';
 import '../widgets/receipt_ticket.dart';
 import '../widgets/history_tab.dart';
+import '../widgets/app_toast.dart';
+import 'settings_screen.dart';
 
 class RentCalculatorHome extends StatefulWidget {
   final VoidCallback onToggleTheme;
@@ -49,9 +51,17 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
   List<RentBill> _history = [];
 
   int? _liveUnits;
-  double? _liveElecCost;
 
   static const String _historyKey = 'rent_history_v1';
+
+  // Defaults-related state
+  static const String _defaultsKey = 'default_charges_v1';
+  double? _defaultRate;
+  double? _defaultWater;
+  double? _defaultRent;
+
+  bool get _hasDefaults =>
+      _defaultRate != null || _defaultWater != null || _defaultRent != null;
 
   @override
   void initState() {
@@ -59,6 +69,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     _tabController = TabController(length: 2, vsync: this);
     _initDateDefaults();
     _loadHistory();
+    _loadDefaults();
   }
 
   void _initDateDefaults() {
@@ -86,9 +97,8 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
   }
 
   void _updateLiveValues() {
-    final prev = int.tryParse(_prevReadingCtrl.text.trim());
-    final curr = int.tryParse(_currReadingCtrl.text.trim());
-    final rate = double.tryParse(_costPerUnitCtrl.text.trim());
+    final prev = int.tryParse(_prevReadingCtrl.text.trim().replaceAll(',', ''));
+    final curr = int.tryParse(_currReadingCtrl.text.trim().replaceAll(',', ''));
 
     setState(() {
       if (prev != null && curr != null && curr >= prev) {
@@ -96,12 +106,25 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
       } else {
         _liveUnits = null;
       }
-      if (_liveUnits != null && rate != null) {
-        _liveElecCost = _liveUnits! * rate;
-      } else {
-        _liveElecCost = null;
-      }
     });
+  }
+
+  /// Custom toast wrapper for this screen
+  void _showToast(
+    String message, {
+    bool isError = true,
+    bool top = true,
+    AppToastStyle? style,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    AppToast.show(
+      context,
+      message,
+      isError: isError,
+      position: top ? AppToastPosition.top : AppToastPosition.bottom,
+      style: style, // null = platform-based, or force Android/Cupertino
+      duration: duration,
+    );
   }
 
   Future<void> _loadHistory() async {
@@ -120,6 +143,111 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     } catch (_) {}
   }
 
+  Future<void> _loadDefaults() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_defaultsKey);
+
+    if (raw == null) {
+      if (mounted) {
+        setState(() {
+          _defaultRate = null;
+          _defaultWater = null;
+          _defaultRent = null;
+        });
+      }
+      return;
+    }
+
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _defaultRate = (map['rate'] as num?)?.toDouble();
+          _defaultWater = (map['water'] as num?)?.toDouble();
+          _defaultRent = (map['rent'] as num?)?.toDouble();
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _defaultRate = null;
+          _defaultWater = null;
+          _defaultRent = null;
+        });
+      }
+    }
+  }
+
+  /// Format a number for UI:
+  /// - add thousand separators
+  /// - drop `.0` if integer
+  String _formatNumberForUi(num value) {
+    String raw;
+    if (value is int || value % 1 == 0) {
+      raw = value.toInt().toString();
+    } else {
+      raw = value.toString();
+    }
+
+    String integerPart = raw;
+    String decimalPart = '';
+    if (raw.contains('.')) {
+      final parts = raw.split('.');
+      integerPart = parts[0];
+      decimalPart = parts.length > 1 ? parts[1] : '';
+    }
+
+    final isNegative = integerPart.startsWith('-');
+    if (isNegative) {
+      integerPart = integerPart.substring(1);
+    }
+
+    final buffer = StringBuffer();
+    for (int i = 0; i < integerPart.length; i++) {
+      final positionFromEnd = integerPart.length - i;
+      buffer.write(integerPart[i]);
+      if (positionFromEnd > 1 && positionFromEnd % 3 == 1) {
+        buffer.write(',');
+      }
+    }
+
+    String result = buffer.toString();
+    if (decimalPart.isNotEmpty && decimalPart != '0') {
+      result = '$result.$decimalPart';
+    }
+    if (isNegative) {
+      result = '-$result';
+    }
+    return result;
+  }
+
+  void _applyDefaultsToForm({bool showMessage = true}) {
+    if (!_hasDefaults) {
+      if (showMessage) {
+        _showToast('No default charges saved yet.', isError: true);
+      }
+      return;
+    }
+
+    setState(() {
+      if (_defaultRate != null) {
+        _costPerUnitCtrl.text = _formatNumberForUi(_defaultRate!);
+      }
+      if (_defaultWater != null) {
+        _waterChargeCtrl.text = _formatNumberForUi(_defaultWater!);
+      }
+      if (_defaultRent != null) {
+        _baseRentCtrl.text = _formatNumberForUi(_defaultRent!);
+      }
+    });
+
+    _updateLiveValues();
+
+    if (showMessage) {
+      _showToast('Defaults applied.', isError: false);
+    }
+  }
+
   Future<void> _saveBillToHistory(RentBill bill) async {
     final prefs = await SharedPreferences.getInstance();
     final List<RentBill> updated = [bill, ..._history];
@@ -128,7 +256,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
         .toList();
     await prefs.setString(_historyKey, jsonEncode(mapped));
     setState(() => _history = updated);
-    _showSnackBar('Saved successfully!', isError: false);
+    _showToast('Saved successfully!', isError: false);
     _tabController.animateTo(1);
   }
 
@@ -145,6 +273,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_historyKey);
     setState(() => _history = []);
+    _showToast('History cleared.', isError: false);
   }
 
   Future<void> _pickNepaliBillingDate() async {
@@ -220,17 +349,21 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
       await Share.shareXFiles([xFile], text: 'Rent Bill: ${bill.monthYear}');
     } catch (e) {
       if (mounted) Navigator.pop(context);
-      _showSnackBar('Share failed: $e');
+      _showToast('Share failed: $e', isError: true);
     }
   }
 
   void _calculate() {
     FocusScope.of(context).unfocus();
-    final prev = int.tryParse(_prevReadingCtrl.text.trim());
-    final curr = int.tryParse(_currReadingCtrl.text.trim());
-    final cost = double.tryParse(_costPerUnitCtrl.text.trim());
-    final water = double.tryParse(_waterChargeCtrl.text.trim());
-    final rent = double.tryParse(_baseRentCtrl.text.trim());
+    final prev = int.tryParse(_prevReadingCtrl.text.trim().replaceAll(',', ''));
+    final curr = int.tryParse(_currReadingCtrl.text.trim().replaceAll(',', ''));
+    final cost = double.tryParse(
+      _costPerUnitCtrl.text.trim().replaceAll(',', ''),
+    );
+    final water = double.tryParse(
+      _waterChargeCtrl.text.trim().replaceAll(',', ''),
+    );
+    final rent = double.tryParse(_baseRentCtrl.text.trim().replaceAll(',', ''));
     final monthYear = _monthYearCtrl.text.trim();
 
     if (prev == null ||
@@ -239,11 +372,14 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
         water == null ||
         rent == null ||
         _billingDateBs == null) {
-      _showSnackBar('Please check all fields.');
+      _showToast('Please check all fields.', isError: true);
       return;
     }
     if (curr < prev) {
-      _showSnackBar('Current reading cannot be lower than previous.');
+      _showToast(
+        'Current reading cannot be lower than previous.',
+        isError: true,
+      );
       return;
     }
 
@@ -291,28 +427,17 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
       _baseRentCtrl.clear();
       _currentBill = null;
       _liveUnits = null;
-      _liveElecCost = null;
       _initDateDefaults();
     });
+
     FocusScope.of(context).unfocus();
   }
 
-  void _showSnackBar(String message, {bool isError = true}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        backgroundColor: isError
-            ? const Color(0xFFFF5252)
-            : const Color(0xFF00C853),
-      ),
-    );
+  Future<void> _openSettings() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await _loadDefaults();
   }
 
   @override
@@ -341,6 +466,12 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
             ),
             color: isDark ? Colors.amber : Colors.white,
             tooltip: 'Toggle Theme',
+          ),
+          IconButton(
+            onPressed: _openSettings,
+            icon: const Icon(Icons.settings_rounded),
+            color: Colors.white,
+            tooltip: 'Settings',
           ),
           const SizedBox(width: 8),
         ],
@@ -539,25 +670,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
                 title: 'Meter & Consumption',
                 subtitle: 'Enter previous and current reading',
                 icon: Icons.electric_meter_rounded,
-                trailing: _liveUnits != null
-                    ? Chip(
-                        backgroundColor: primary.withValues(alpha: 0.12),
-                        label: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.bolt_rounded, size: 16, color: primary),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${_liveUnits!} units',
-                              style: TextStyle(
-                                color: primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : null,
+                trailing: null,
                 child: Column(
                   children: [
                     Row(
@@ -627,77 +740,71 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
 
               const SizedBox(height: 16),
 
-              // CHARGES CARD
+              // RATES & FIXED CHARGES CARD
               SectionCard(
                 title: 'Rates & Fixed Charges',
-                subtitle: 'Add electricity rate, water and base rent',
+                subtitle: 'Set electricity, water and rent',
                 icon: Icons.payments_rounded,
-                trailing: _liveElecCost != null
-                    ? Chip(
-                        backgroundColor: primary.withValues(alpha: 0.12),
-                        label: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Rs.',
-                              style: TextStyle(
-                                color: primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${_liveElecCost!.round()}',
-                              style: TextStyle(
-                                color: primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : null,
+                trailing: Tooltip(
+                  message: _hasDefaults
+                      ? 'Load saved default charges'
+                      : 'No defaults saved yet',
+                  child: IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _hasDefaults
+                        ? () => _applyDefaultsToForm()
+                        : null,
+                    icon: Icon(
+                      Icons.download_rounded,
+                      size: 18,
+                      color: _hasDefaults
+                          ? primary
+                          : theme.disabledColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
                 child: Column(
                   children: [
-                    ProInput(
-                      controller: _costPerUnitCtrl,
-                      label: 'Electricity rate',
-                      icon: Icons.flash_on_rounded,
-                      suffixText: '/ unit',
-                      hint: 'e.g. 10',
-                      decimal: true,
-                      focusNode: _costFocus,
-                      nextFocus: _waterFocus,
-                      onChanged: (_) => _updateLiveValues(),
-                    ),
-                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
                           child: ProInput(
-                            controller: _waterChargeCtrl,
-                            label: 'Water charge',
-                            icon: Icons.water_drop_rounded,
-                            prefixText: 'Rs. ',
-                            hint: '500',
+                            controller: _costPerUnitCtrl,
+                            label: 'Electricity rate',
+                            icon: Icons.currency_rupee_rounded,
+                            suffixText: '/ unit',
+                            hint: '10',
                             decimal: true,
-                            focusNode: _waterFocus,
-                            nextFocus: _rentFocus,
+                            formatWithSeparator: true,
+                            focusNode: _costFocus,
+                            nextFocus: _waterFocus,
+                            onChanged: (_) => _updateLiveValues(),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: ProInput(
-                            controller: _baseRentCtrl,
-                            label: 'Monthly rent',
-                            icon: Icons.home_rounded,
-                            prefixText: 'Rs. ',
-                            hint: '15000',
+                            controller: _waterChargeCtrl,
+                            label: 'Water charge',
+                            icon: Icons.currency_rupee_rounded,
+                            hint: '500',
                             decimal: true,
-                            focusNode: _rentFocus,
+                            formatWithSeparator: true,
+                            focusNode: _waterFocus,
+                            nextFocus: _rentFocus,
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 10),
+                    ProInput(
+                      controller: _baseRentCtrl,
+                      label: 'Monthly rent',
+                      icon: Icons.currency_rupee_rounded,
+                      hint: '15,000',
+                      decimal: true,
+                      formatWithSeparator: true,
+                      focusNode: _rentFocus,
                     ),
                   ],
                 ),

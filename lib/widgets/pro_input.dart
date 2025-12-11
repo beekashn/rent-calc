@@ -8,6 +8,7 @@ class ProInput extends StatelessWidget {
   final String? prefixText;
   final String? suffixText;
   final bool decimal;
+  final bool formatWithSeparator;
   final FocusNode focusNode;
   final FocusNode? nextFocus;
   final ValueChanged<String>? onChanged;
@@ -21,10 +22,50 @@ class ProInput extends StatelessWidget {
     this.prefixText,
     this.suffixText,
     this.decimal = false,
+    this.formatWithSeparator = false,
     required this.focusNode,
     this.nextFocus,
     this.onChanged,
   });
+
+  String _formatNumber(String raw) {
+    // remove existing commas
+    raw = raw.replaceAll(',', '');
+    if (raw.isEmpty) return '';
+
+    // split integer/decimal part
+    String integerPart = raw;
+    String decimalPart = '';
+    if (raw.contains('.')) {
+      final parts = raw.split('.');
+      integerPart = parts[0];
+      decimalPart = parts.length > 1 ? parts[1] : '';
+    }
+
+    final isNegative = integerPart.startsWith('-');
+    if (isNegative) {
+      integerPart = integerPart.substring(1);
+    }
+
+    // add thousand separators to integer part
+    final buffer = StringBuffer();
+    for (int i = 0; i < integerPart.length; i++) {
+      final positionFromEnd = integerPart.length - i;
+      buffer.write(integerPart[i]);
+      if (positionFromEnd > 1 && positionFromEnd % 3 == 1) {
+        buffer.write(',');
+      }
+    }
+
+    String result = buffer.toString();
+    if (decimal && decimalPart.isNotEmpty) {
+      result = '$result.$decimalPart';
+    }
+    if (isNegative) {
+      result = '-$result';
+    }
+    return result;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +91,33 @@ class ProInput extends StatelessWidget {
           textInputAction: nextFocus != null
               ? TextInputAction.next
               : TextInputAction.done,
-          onChanged: onChanged,
+          onChanged: (value) {
+            if (formatWithSeparator) {
+              final withoutCommas = value.replaceAll(',', '');
+              if (withoutCommas.isEmpty) {
+                onChanged?.call('');
+                return;
+              }
+
+              final parsed = double.tryParse(withoutCommas);
+              if (parsed == null) {
+                onChanged?.call(value);
+                return;
+              }
+
+              final formatted = _formatNumber(withoutCommas);
+              if (formatted != value) {
+                controller.value = TextEditingValue(
+                  text: formatted,
+                  selection: TextSelection.collapsed(offset: formatted.length),
+                );
+              }
+
+              onChanged?.call(formatted);
+            } else {
+              onChanged?.call(value);
+            }
+          },
           onSubmitted: (_) => nextFocus != null
               ? FocusScope.of(context).requestFocus(nextFocus)
               : FocusScope.of(context).unfocus(),

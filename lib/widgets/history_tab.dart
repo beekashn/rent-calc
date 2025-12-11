@@ -30,29 +30,38 @@ class HistoryTab extends StatelessWidget {
     if (bills.isEmpty) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
+          padding: const EdgeInsets.symmetric(horizontal: 40),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.history_toggle_off_rounded,
-                size: 90,
-                color: theme.dividerColor.withValues(alpha: 0.8),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'No bills yet',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.3,
+                  ),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.receipt_long_rounded,
+                  size: 48,
+                  color: theme.disabledColor,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 24),
               Text(
-                'Calculated bills you save will appear here for quick reference and sharing.',
+                'No History Yet',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: theme.textTheme.bodyLarge?.color,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Your saved bills will appear here.',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.hintColor,
-                ),
+                style: TextStyle(color: theme.hintColor, fontSize: 14),
               ),
             ],
           ),
@@ -60,269 +69,256 @@ class HistoryTab extends StatelessWidget {
       );
     }
 
-    return Column(
+    return Stack(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-          child: Row(
-            children: [
-              Text(
-                'Recent bills',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
+        // MAIN LIST
+        ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 80), // extra bottom
+          itemCount: bills.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final bill = bills[index];
+
+            return Dismissible(
+              key: Key(bill.id),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade400,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.only(right: 24),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      "Delete",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    Icon(Icons.delete_outline_rounded, color: Colors.white),
+                  ],
                 ),
               ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: onClearAll,
-                icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-                label: const Text('Clear all'),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-            itemCount: bills.length,
-            itemBuilder: (context, index) {
-              final bill = bills[index];
-              final bool isLast = index == bills.length - 1;
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Dismissible(
-                  key: Key(bill.id),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    padding: const EdgeInsets.only(right: 24),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade400,
-                      borderRadius: BorderRadius.circular(20),
+              confirmDismiss: (d) async {
+                onDeleteBill(bill);
+                return true;
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: theme.cardTheme.color,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.2 : 0.04,
+                      ),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
-                    alignment: Alignment.centerRight,
-                    child: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Colors.white,
-                    ),
+                  ],
+                  border: Border.all(
+                    color: theme.dividerColor.withValues(alpha: 0.05),
                   ),
-                  confirmDismiss: (d) async {
-                    onDeleteBill(bill);
-                    return true;
-                  },
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // TIMELINE INDICATOR
-                      Column(
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        isScrollControlled: true,
+                        builder: (_) => BillPreviewSheet(
+                          bill: bill,
+                          onShare: () => onShareBill(bill),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
                         children: [
+                          // DATE BOX
                           Container(
-                            width: 10,
-                            height: 10,
+                            width: 50,
+                            height: 50,
                             decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: primary,
-                              border: Border.all(
-                                color: isDark ? Colors.white : Colors.white,
-                                width: 2,
-                              ),
+                              color: primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  bill.monthYear.substring(0, 3).toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  bill.billingDateBs.split('-').last,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: theme.textTheme.bodyMedium?.color,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          if (!isLast)
-                            Container(
-                              width: 1.5,
-                              height: 64,
-                              color: theme.dividerColor.withValues(alpha: 0.5),
+
+                          const SizedBox(width: 16),
+
+                          // DETAILS
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  bill.monthYear,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.bolt_rounded,
+                                      size: 14,
+                                      color: theme.hintColor,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      '${bill.units} units',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: theme.hintColor,
+                                      ),
+                                    ),
+                                    Container(
+                                      margin: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                      ),
+                                      width: 3,
+                                      height: 3,
+                                      decoration: BoxDecoration(
+                                        color: theme.hintColor.withValues(
+                                          alpha: 0.5,
+                                        ),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    Text(
+                                      bill.billingDateBs,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: theme.hintColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
+                          ),
+
+                          // PRICE & ARROW
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                'Rs. ${_fmt(bill.total.round())}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                  color: isDark
+                                      ? const Color(0xFF69F0AE)
+                                      : const Color(0xFF00C853),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Icon(
+                                Icons.arrow_forward_ios_rounded,
+                                size: 12,
+                                color: theme.hintColor.withValues(alpha: 0.5),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
-                      const SizedBox(width: 12),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
 
-                      // CARD
-                      Expanded(
-                        child: Card(
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(20),
-                            onTap: () {
-                              showModalBottomSheet(
-                                context: context,
-                                backgroundColor: Colors.transparent,
-                                isScrollControlled: true,
-                                builder: (_) => BillPreviewSheet(
-                                  bill: bill,
-                                  onShare: () => onShareBill(bill),
-                                ),
-                              );
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Left month chip
-                                  Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: [
-                                          primary.withValues(alpha: 0.18),
-                                          primary.withValues(alpha: 0.08),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        bill.monthYear
-                                            .substring(0, 3)
-                                            .toUpperCase(),
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          fontSize: 12,
-                                          color: isDark
-                                              ? Colors.white
-                                              : primary,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-
-                                  // Middle text
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          bill.monthYear,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 15,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            Icon(
-                                              Icons.electric_bolt_rounded,
-                                              size: 14,
-                                              color: theme.hintColor,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Flexible(
-                                              child: Text(
-                                                '${bill.units} units',
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: theme.hintColor,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Icon(
-                                              Icons.calendar_today_rounded,
-                                              size: 14,
-                                              color: theme.hintColor,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Flexible(
-                                              child: Text(
-                                                bill.billingDateBs,
-                                                style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: theme.hintColor,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-
-                                  const SizedBox(width: 8),
-
-                                  // Trailing column
-                                  FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerRight,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          'Rs. ${_fmt(bill.total.round())}',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 16,
-                                            color: isDark
-                                                ? Colors.white
-                                                : primary,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        InkWell(
-                                          onTap: () => onShareBill(bill),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                              color: theme
-                                                  .scaffoldBackgroundColor
-                                                  .withValues(alpha: 0.9),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.share_rounded,
-                                                  size: 12,
-                                                  color: theme.hintColor,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  'Share',
-                                                  style: TextStyle(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: theme.hintColor,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
+        // FIXED BOTTOM-LEFT "Clear all" BUTTON
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: SafeArea(
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade500,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                elevation: 4,
+              ),
+              icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+              label: const Text(
+                'Clear all',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              ),
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Clear all history?'),
+                    content: const Text(
+                      'This will permanently delete all saved bills. '
+                      'Are you sure you want to continue?',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
                         ),
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        child: const Text('Clear'),
                       ),
                     ],
                   ),
-                ),
-              );
-            },
+                );
+
+                if (confirm == true) {
+                  onClearAll();
+                }
+              },
+            ),
           ),
         ),
       ],
@@ -346,7 +342,7 @@ class BillPreviewSheet extends StatelessWidget {
     final primary = theme.colorScheme.primary;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.82,
+      initialChildSize: 0.85,
       minChildSize: 0.6,
       maxChildSize: 0.95,
       builder: (context, controller) {
@@ -359,51 +355,55 @@ class BillPreviewSheet extends StatelessWidget {
             children: [
               const SizedBox(height: 12),
               Container(
-                width: 44,
+                width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: theme.dividerColor.withValues(alpha: 0.8),
+                  color: theme.dividerColor.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(999),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
-                ),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
                 child: Row(
                   children: [
                     Text(
-                      'Bill preview',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
+                      'Bill Details',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const Spacer(),
-                    IconButton.filledTonal(
-                      style: IconButton.styleFrom(
-                        backgroundColor: primary,
-                        foregroundColor: Colors.white,
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: primary,
+                        side: BorderSide(color: primary.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: onShare,
                       icon: const Icon(Icons.share_rounded, size: 18),
-                      tooltip: 'Share bill',
+                      label: const Text("Share"),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 8),
                     IconButton(
+                      style: IconButton.styleFrom(
+                        backgroundColor: theme
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.5),
+                      ),
                       onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
+                      icon: const Icon(Icons.close_rounded, size: 20),
                     ),
                   ],
                 ),
               ),
+              const Divider(height: 1),
               Expanded(
                 child: SingleChildScrollView(
                   controller: controller,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.all(20),
                   child: ReceiptTicket(bill: bill),
                 ),
               ),
