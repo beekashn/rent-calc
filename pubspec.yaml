@@ -23,6 +23,9 @@ dependencies:
   share_plus: ^10.0.0         # To share the image to WhatsApp/Messenger
   path_provider: ^2.1.2       # To get temporary storage path
 
+  # Charts
+  fl_chart: ^0.69.0           # For displaying charts
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter

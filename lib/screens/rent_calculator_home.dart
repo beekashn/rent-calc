@@ -16,6 +16,7 @@ import '../widgets/pro_input.dart';
 import '../widgets/receipt_ticket.dart';
 import '../widgets/history_tab.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/dashboard_tab.dart'; // ✅ NEW
 import 'settings_screen.dart';
 
 class RentCalculatorHome extends StatefulWidget {
@@ -66,7 +67,8 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // ✅ was length: 2
+    _tabController = TabController(length: 3, vsync: this);
     _initDateDefaults();
     _loadHistory();
     _loadDefaults();
@@ -257,7 +259,9 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     await prefs.setString(_historyKey, jsonEncode(mapped));
     setState(() => _history = updated);
     _showToast('Saved successfully!', isError: false);
-    _tabController.animateTo(1);
+
+    // ✅ was animateTo(1) when there were 2 tabs. Now History is index 2.
+    _tabController.animateTo(2);
   }
 
   Future<void> _deleteBill(RentBill bill) async {
@@ -441,6 +445,25 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
   }
 
   @override
+  void dispose() {
+    _prevReadingCtrl.dispose();
+    _currReadingCtrl.dispose();
+    _costPerUnitCtrl.dispose();
+    _waterChargeCtrl.dispose();
+    _baseRentCtrl.dispose();
+    _monthYearCtrl.dispose();
+
+    _prevFocus.dispose();
+    _currFocus.dispose();
+    _costFocus.dispose();
+    _waterFocus.dispose();
+    _rentFocus.dispose();
+
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -506,7 +529,9 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),
+                // ✅ NEW TAB ORDER
                 tabs: const [
+                  Tab(text: 'Dashboard'),
                   Tab(text: 'Calculator'),
                   Tab(text: 'History'),
                 ],
@@ -529,7 +554,13 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
             child: TabBarView(
               controller: _tabController,
               children: [
+                // ✅ NEW: DASHBOARD (uses history)
+                DashboardTab(bills: _history),
+
+                // Existing: Calculator
                 _buildCalculatorTab(theme),
+
+                // Existing: History
                 HistoryTab(
                   bills: _history,
                   onDeleteBill: _deleteBill,
