@@ -79,6 +79,29 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     _monthYearCtrl.text = _monthYearLabelForDate(_billingDateBs!);
   }
 
+  RentBill? _latestBillFromHistory(List<RentBill> bills) {
+    if (bills.isEmpty) return null;
+    return bills.reduce(
+      (a, b) => a.createdAt.isAfter(b.createdAt) ? a : b,
+    );
+  }
+
+  void _autofillPreviousReadingFromHistory({bool force = false}) {
+    final latestBill = _latestBillFromHistory(_history);
+    if (latestBill == null) return;
+
+    if (!force && _prevReadingCtrl.text.trim().isNotEmpty) return;
+
+    final nextPrevReading = _formatNumberForUi(latestBill.currentReading);
+    if (_prevReadingCtrl.text == nextPrevReading) return;
+
+    _prevReadingCtrl.text = nextPrevReading;
+    _prevReadingCtrl.selection = TextSelection.fromPosition(
+      TextPosition(offset: _prevReadingCtrl.text.length),
+    );
+    _updateLiveValues();
+  }
+
   String _monthYearLabelForDate(NepaliDateTime date) {
     const months = [
       '',
@@ -142,6 +165,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
             .reversed
             .toList();
       });
+      _autofillPreviousReadingFromHistory();
     } catch (_) {}
   }
 
@@ -258,6 +282,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
         .toList();
     await prefs.setString(_historyKey, jsonEncode(mapped));
     setState(() => _history = updated);
+    _autofillPreviousReadingFromHistory(force: true);
     _showToast('Saved successfully!', isError: false);
 
     // ✅ was animateTo(1) when there were 2 tabs. Now History is index 2.
