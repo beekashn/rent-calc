@@ -466,6 +466,7 @@ class _RentCalculatorHomeState extends State<RentCalculatorHome>
     await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await _loadHistory();
     await _loadDefaults();
   }
 

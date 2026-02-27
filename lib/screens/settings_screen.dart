@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../widgets/section_card.dart';
@@ -16,6 +20,9 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const String _defaultsKey = 'default_charges_v1';
+  static const String _historyKey = 'rent_history_v1';
+  static const String _themeKey = 'theme_mode_final_v2';
+  static const int _backupSchemaVersion = 1;
 
   final TextEditingController _rateCtrl = TextEditingController();
   final TextEditingController _waterCtrl = TextEditingController();
@@ -26,6 +33,216 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final FocusNode _rentFocus = FocusNode();
 
   bool _isLoading = true;
+  bool _isBusy = false;
+
+  String _backupFileName() {
+    final now = DateTime.now();
+    final y = now.year.toString().padLeft(4, '0');
+    final m = now.month.toString().padLeft(2, '0');
+    final d = now.day.toString().padLeft(2, '0');
+    final hh = now.hour.toString().padLeft(2, '0');
+    final mm = now.minute.toString().padLeft(2, '0');
+    final ss = now.second.toString().padLeft(2, '0');
+    return 'rent_calc_backup_$y$m$d-$hh$mm$ss.json';
+  }
+
+  List<Map<String, dynamic>> _safeHistoryList(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _exportBackup() async {
+    if (_isBusy) return;
+
+    setState(() => _isBusy = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final history = _safeHistoryList(prefs.getString(_historyKey));
+      final defaultsRaw = prefs.getString(_defaultsKey);
+      final defaults = defaultsRaw == null
+          ? null
+          : Map<String, dynamic>.from(jsonDecode(defaultsRaw) as Map);
+      final theme = prefs.getString(_themeKey);
+
+      final payload = <String, dynamic>{
+        'schemaVersion': _backupSchemaVersion,
+        'exportedAt': DateTime.now().toUtc().toIso8601String(),
+        'app': 'rent_calc',
+        'history': history,
+        'defaults': defaults,
+        'themeMode': theme,
+      };
+
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}/${_backupFileName()}');
+      await file.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(payload),
+      );
+
+      await Share.shareXFiles([
+        XFile(file.path),
+      ], text: 'Rent Calc backup file');
+
+      if (!mounted) return;
+      _showToast('Backup file ready to share.', isError: false);
+    } catch (_) {
+      if (!mounted) return;
+      _showToast('Backup export failed.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
+
+  Future<bool?> _showRestoreModeDialog() async {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Restore mode'),
+        content: const Text(
+          'Merge keeps existing bills and adds new ones. Replace overwrites current local data.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Merge'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Replace'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _importBackup() async {
+    if (_isBusy) return;
+
+    setState(() => _isBusy = true);
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+
+      if (picked == null ||
+          picked.files.isEmpty ||
+          picked.files.first.path == null) {
+        _showToast('No backup file selected.', isError: true);
+        return;
+      }
+
+      final mode = await _showRestoreModeDialog();
+      if (mode == null) return;
+
+      final filePath = picked.files.first.path!;
+      final raw = await File(filePath).readAsString();
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        _showToast('Invalid backup format.', isError: true);
+        return;
+      }
+
+      final schemaVersion = decoded['schemaVersion'];
+      if (schemaVersion is! int || schemaVersion <= 0) {
+        _showToast('Unsupported backup schema.', isError: true);
+        return;
+      }
+
+      final importedHistoryRaw = decoded['history'];
+      final importedHistory = importedHistoryRaw is List
+          ? importedHistoryRaw
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList()
+          : <Map<String, dynamic>>[];
+      final importedDefaults = decoded['defaults'] is Map
+          ? Map<String, dynamic>.from(decoded['defaults'] as Map)
+          : null;
+      final importedThemeRaw = decoded['themeMode'];
+      final importedTheme = importedThemeRaw is String
+          ? importedThemeRaw
+          : null;
+
+      final prefs = await SharedPreferences.getInstance();
+
+      int importedCount = 0;
+      int skippedDuplicates = 0;
+
+      if (mode) {
+        // Replace mode
+        await prefs.setString(_historyKey, jsonEncode(importedHistory));
+        importedCount = importedHistory.length;
+
+        if (importedDefaults == null) {
+          await prefs.remove(_defaultsKey);
+        } else {
+          await prefs.setString(_defaultsKey, jsonEncode(importedDefaults));
+        }
+      } else {
+        // Merge mode
+        final existingHistory = _safeHistoryList(prefs.getString(_historyKey));
+        final existingIds = existingHistory
+            .map((e) => e['id']?.toString())
+            .whereType<String>()
+            .toSet();
+
+        final merged = <Map<String, dynamic>>[...existingHistory];
+        for (final entry in importedHistory) {
+          final id = entry['id']?.toString();
+          if (id != null && id.isNotEmpty && existingIds.contains(id)) {
+            skippedDuplicates++;
+            continue;
+          }
+          if (id != null && id.isNotEmpty) {
+            existingIds.add(id);
+          }
+          merged.add(entry);
+          importedCount++;
+        }
+
+        await prefs.setString(_historyKey, jsonEncode(merged));
+
+        if (importedDefaults != null) {
+          await prefs.setString(_defaultsKey, jsonEncode(importedDefaults));
+        }
+      }
+
+      if (importedTheme == 'dark' || importedTheme == 'light') {
+        await prefs.setString(_themeKey, importedTheme!);
+      }
+
+      if (!mounted) return;
+      final modeText = mode ? 'replaced' : 'merged';
+      _showToast(
+        'Backup $modeText. Added $importedCount bill(s), skipped $skippedDuplicates duplicate(s).',
+        isError: false,
+      );
+      await _loadDefaults();
+    } catch (_) {
+      if (!mounted) return;
+      _showToast('Backup import failed.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isBusy = false);
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -33,12 +250,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadDefaults();
   }
 
-  void _showToast(String message, {bool isError = true, bool top = true}) {
+  void _showToast(
+    String message, {
+    bool isError = true,
+    bool top = true,
+    AppToastStyle? style,
+  }) {
     AppToast.show(
       context,
       message,
       isError: isError,
-      style: AppToastStyle.cupertino,
+      style: style,
       position: top ? AppToastPosition.top : AppToastPosition.bottom,
       duration: const Duration(seconds: 2),
     );
@@ -166,6 +388,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
+    final borderColor = theme.colorScheme.outline.withValues(alpha: 0.18);
 
     return Scaffold(
       appBar: AppBar(
@@ -182,10 +405,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: primary.withValues(alpha: 0.20),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: primary.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.tune_rounded,
+                              color: primary,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Manage your default charges and backup your data for device changes.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     SectionCard(
                       title: 'Default rates & charges',
                       subtitle:
-                          'These values will be used when you tap the download icon in the calculator.',
+                          'Used when you tap the download icon in Calculator.',
                       icon: Icons.settings_suggest_rounded,
                       child: Column(
                         children: [
@@ -258,38 +517,147 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: _saveDefaults,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        elevation: 3,
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.30),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: borderColor),
                       ),
-                      icon: const Icon(Icons.save_rounded),
-                      label: const Text(
-                        'Save defaults',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                        ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _clearDefaults,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.red,
+                                side: BorderSide(
+                                  color: Colors.red.withValues(alpha: 0.35),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.delete_outline_rounded),
+                              label: const Text(
+                                'Clear',
+                                style: TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              onPressed: _saveDefaults,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primary,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                              ),
+                              icon: const Icon(Icons.save_rounded),
+                              label: const Text(
+                                'Save defaults',
+                                style: TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextButton.icon(
-                      onPressed: _clearDefaults,
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.red,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      icon: const Icon(Icons.delete_outline_rounded),
-                      label: const Text(
-                        'Clear defaults',
-                        style: TextStyle(fontWeight: FontWeight.w600),
+                    const SizedBox(height: 24),
+                    SectionCard(
+                      title: 'Backup & Restore',
+                      subtitle:
+                          'Export JSON backup and restore across devices.',
+                      icon: Icons.backup_rounded,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: theme.colorScheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.35),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.verified_user_rounded,
+                                  size: 16,
+                                  color: theme.hintColor,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Import supports Merge and Replace modes with duplicate checks by bill id.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.hintColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: _isBusy ? null : _exportBackup,
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.ios_share_rounded),
+                              label: const Text('Export backup'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _isBusy ? null : _importBackup,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: theme.colorScheme.secondary,
+                                foregroundColor: theme.colorScheme.onSecondary,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              icon: const Icon(Icons.upload_file_rounded),
+                              label: const Text('Import backup'),
+                            ),
+                          ),
+                          if (_isBusy) ...[
+                            const SizedBox(height: 12),
+                            const LinearProgressIndicator(minHeight: 3),
+                          ],
+                        ],
                       ),
                     ),
                   ],

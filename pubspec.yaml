@@ -22,6 +22,7 @@ dependencies:
   screenshot: ^3.0.0          # To capture the receipt widget as an image
   share_plus: ^10.0.0         # To share the image to WhatsApp/Messenger
   path_provider: ^2.1.2       # To get temporary storage path
+  file_picker: ^8.1.2         # To import backup JSON files from storage
 
   # Charts
   fl_chart: ^0.69.0           # For displaying charts
